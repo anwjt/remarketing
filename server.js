@@ -17,7 +17,7 @@ app.get('/', (req, res) => {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Upload Excel</title>
+            <title>L-MKT</title>
             <!-- ใช้ CDN ของ Bootstrap -->
             <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
         </head>
@@ -133,7 +133,7 @@ app.post('/upload', upload.single('file'), (req, res) => {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Excel Results</title>
+            <title>L-MKT</title>
             <!-- ใช้ CDN ของ Bootstrap -->
             <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
         </head>

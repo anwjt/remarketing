@@ -51,26 +51,34 @@ app.post('/upload', upload.single('file'), (req, res) => {
     const data1 = xlsx.utils.sheet_to_json(sheet1);
 
     // การประมวลผลข้อมูลจาก Sheet แรก
-    let productSet1 = new Set();
-    let modelMap1 = new Map();
+    let modelMap1 = new Map(); // ใช้ Map เพื่อเก็บจำนวนรุ่นที่ซ้ำ
 
     data1.forEach(row => {
         if (row['สินค้า'] && row['รุ่นแบบ']) {
-            productSet1.add(row['สินค้า']);
-            if (!modelMap1.has(row['สินค้า'])) {
-                modelMap1.set(row['สินค้า'], new Set());
+            const product = row['สินค้า'];
+            const model = row['รุ่นแบบ'];
+
+            if (!modelMap1.has(product)) {
+                modelMap1.set(product, new Map());
             }
-            modelMap1.get(row['สินค้า']).add(row['รุ่นแบบ']);
+
+            const productModels = modelMap1.get(product);
+
+            productModels.set(model, (productModels.get(model) || 0) + 1); // นับการซ้ำของรุ่น
         }
     });
 
-    const result1 = Array.from(modelMap1.entries()).map(([product, models]) => ({
-        product,
-        totalModels: models.size
-    })).sort((a, b) => b.totalModels - a.totalModels); // เรียงจากมากไปน้อย
+    // คำนวณจำนวนรุ่นแบบทั้งหมด (รวมซ้ำ)
+    const result1 = Array.from(modelMap1.entries()).map(([product, models]) => {
+        const totalModels = Array.from(models.values()).reduce((acc, count) => acc + count, 0); // รวมจำนวนรุ่นที่ซ้ำ
+        return {
+            product,
+            totalModels,
+        };
+    }).sort((a, b) => b.totalModels - a.totalModels); // เรียงจากมากไปน้อย
 
     // คำนวณจำนวนสินค้าทั้งหมดและจำนวนรุ่นแบบทั้งหมด
-    const totalProducts = productSet1.size;
+    const totalProducts = modelMap1.size;
     const totalModels = result1.reduce((acc, row) => acc + row.totalModels, 0);
 
     /** ประมวลผล Sheet ถัดไป (Sheet ที่ 2 เป็นต้นไป) */
@@ -139,7 +147,7 @@ app.post('/upload', upload.single('file'), (req, res) => {
         </head>
         <body>
             <div class="container mt-5">
-                <h1 class="text-center">Line Re-Marketing</h1>
+                <h1 class="text-center">Line Marketing</h1>
 
                 <div class="mt-4">
                     <h3>ข้อมูลจาก Sheet แรก (${sheetName1})</h3>

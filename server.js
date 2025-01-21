@@ -6,7 +6,7 @@ const path = require('path');
 const app = express();
 const port = 3000;
 
-// ตั้งค่าการจัดเก็บไฟล์ที่อัพโหลด
+// ตั้งค่าการอัปโหลดไฟล์
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, 'uploads/');
@@ -17,10 +17,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// ให้บริการไฟล์ CSS และ JS ของ Bootstrap
-app.use('/static', express.static(path.join(__dirname, 'node_modules/bootstrap/dist')));
-
-// หน้าแรกของเว็บ
+// หน้าแรก
 app.get('/', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -29,7 +26,8 @@ app.get('/', (req, res) => {
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Upload Excel</title>
-            <link rel="stylesheet" href="/static/css/bootstrap.min.css">
+            <!-- ใช้ CDN ของ Bootstrap -->
+            <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
         </head>
         <body>
             <div class="container mt-5">
@@ -46,74 +44,96 @@ app.get('/', (req, res) => {
     `);
 });
 
-// API สำหรับอัพโหลดไฟล์ Excel
+// API สำหรับอัปโหลดไฟล์
 app.post('/upload', upload.single('file'), (req, res) => {
     if (!req.file) {
-        return res.send('กรุณาอัพโหลดไฟล์ Excel');
+        return res.send('กรุณาอัปโหลดไฟล์ Excel');
     }
 
-    // อ่านข้อมูลจากไฟล์ Excel
     const workbook = xlsx.readFile(req.file.path);
-    const sheetName1 = workbook.SheetNames[0];
+
+    /** ประมวลผล Sheet แรก */
+    const sheetName1 = workbook.SheetNames[0]; // ดึง Sheet แรก
     const sheet1 = workbook.Sheets[sheetName1];
     const data1 = xlsx.utils.sheet_to_json(sheet1);
 
-    const sheetName2 = workbook.SheetNames[1];
-    const sheet2 = workbook.Sheets[sheetName2];
-    const data2 = xlsx.utils.sheet_to_json(sheet2);
-
-    // ประมวลผลข้อมูลใน Sheet1 (ไม่ต้องเปลี่ยนแปลงตามที่เคยทำ)
-    let productCount = new Set();
-    let modelCount = new Map();
+    // การประมวลผลข้อมูลจาก Sheet แรก
+    let productSet1 = new Set();
+    let modelMap1 = new Map();
 
     data1.forEach(row => {
         if (row['สินค้า'] && row['รุ่นแบบ']) {
-            productCount.add(row['สินค้า']);
-            
-            if (!modelCount.has(row['สินค้า'])) {
-                modelCount.set(row['สินค้า'], new Set());
+            productSet1.add(row['สินค้า']);
+            if (!modelMap1.has(row['สินค้า'])) {
+                modelMap1.set(row['สินค้า'], new Set());
             }
-            modelCount.get(row['สินค้า']).add(row['รุ่นแบบ']);
+            modelMap1.get(row['สินค้า']).add(row['รุ่นแบบ']);
         }
     });
 
-    const result1 = {
-        totalProducts: productCount.size,
-        totalModels: Array.from(modelCount.values()).reduce((acc, models) => acc + models.size, 0),
-        productModelDetails: []
-    };
-
-    modelCount.forEach((models, product) => {
-        result1.productModelDetails.push({
-            product,
-            totalModels: models.size
-        });
-    });
-
-    // ประมวลผลข้อมูลใน Sheet2 (ตามที่คุณต้องการ)
-    let productCount2 = new Map();
-
-    data2.forEach(row => {
-        if (row['โปรสินค้า'] && row['อันดับ']) {
-            const productCode = row['โปรสินค้า']; // รหัสสินค้า
-            const rank = row['อันดับ'].split('/')[0]; // เลขสองตัวหน้าเป็นอันดับ
-            
-            // นับจำนวนรหัสสินค้า
-            if (!productCount2.has(productCode)) {
-                productCount2.set(productCode, { count: 0, ranks: new Set() });
-            }
-            productCount2.get(productCode).count++;
-            productCount2.get(productCode).ranks.add(rank);
-        }
-    });
-
-    const result2 = Array.from(productCount2.entries()).map(([product, { count, ranks }]) => ({
+    const result1 = Array.from(modelMap1.entries()).map(([product, models]) => ({
         product,
-        duplicateCount: count,
-        uniqueRanks: ranks.size
-    }));
+        totalModels: models.size
+    })).sort((a, b) => b.totalModels - a.totalModels); // เรียงจากมากไปน้อย
 
-    // แสดงผลลัพธ์ในรูปแบบ HTML
+    // คำนวณจำนวนสินค้าทั้งหมดและจำนวนรุ่นแบบทั้งหมด
+    const totalProducts = productSet1.size;
+    const totalModels = result1.reduce((acc, row) => acc + row.totalModels, 0);
+
+    /** ประมวลผล Sheet ถัดไป (Sheet ที่ 2 เป็นต้นไป) */
+    const otherSheets = workbook.SheetNames.slice(1); // ดึง Sheet ทั้งหมดหลัง Sheet แรก
+    if (otherSheets.length === 0) {
+        return res.send('ไม่พบ Sheet ถัดไปในไฟล์ Excel');
+    }
+
+    let allResults = [];
+
+    otherSheets.forEach(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        const data = xlsx.utils.sheet_to_json(sheet);
+
+        if (data.length > 0) {
+            let productCountMap = new Map();
+            let rankSetMap = new Map();
+
+            data.forEach(row => {
+                const product = row['โปรสินค้า'];
+                const rank = row['อันดับ'];
+
+                if (product) {
+                    productCountMap.set(product, (productCountMap.get(product) || 0) + 1);
+                }
+
+                if (rank) {
+                    if (!rankSetMap.has(product)) {
+                        rankSetMap.set(product, new Set());
+                    }
+                    rankSetMap.get(product).add(rank);
+                }
+            });
+
+            const result = Array.from(productCountMap.entries()).map(([product, count]) => ({
+                product,
+                duplicateCount: count,
+                uniqueRanks: rankSetMap.get(product)?.size || 0
+            })).sort((a, b) => b.duplicateCount - a.duplicateCount); // เรียงจากมากไปน้อย
+
+            // คำนวณผลรวมในแถวล่างสุดของตาราง
+            const totalDuplicateCount = result.reduce((acc, row) => acc + row.duplicateCount, 0);
+            const totalUniqueRanks = result.reduce((acc, row) => acc + row.uniqueRanks, 0);
+
+            // เพิ่มแถวผลรวมสุดท้าย
+            result.push({
+                product: 'รวมทั้งหมด',
+                duplicateCount: totalDuplicateCount,
+                uniqueRanks: totalUniqueRanks
+            });
+
+            allResults.push({ sheetName, result });
+        }
+    });
+
+    /** ส่งผลลัพธ์ */
     res.send(`
         <!DOCTYPE html>
         <html lang="en">
@@ -121,19 +141,20 @@ app.post('/upload', upload.single('file'), (req, res) => {
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Excel Results</title>
-            <link rel="stylesheet" href="/static/css/bootstrap.min.css">
+            <!-- ใช้ CDN ของ Bootstrap -->
+            <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
         </head>
         <body>
             <div class="container mt-5">
                 <h1 class="text-center">ผลลัพธ์จากการประมวลผล Excel</h1>
 
                 <div class="mt-4">
-                    <h3>ข้อมูลจาก Sheet 1</h3>
+                    <h3>ข้อมูลจาก Sheet แรก (${sheetName1})</h3>
                     <ul>
-                        <li>จำนวนสินค้าทั้งหมด: <strong>${result1.totalProducts}</strong></li>
-                        <li>จำนวนรุ่นแบบทั้งหมด: <strong>${result1.totalModels}</strong></li>
+                        <li>จำนวนสินค้าทั้งหมด: <strong>${totalProducts}</strong></li>
+                        <li>จำนวนรุ่นแบบทั้งหมด: <strong>${totalModels}</strong></li>
                     </ul>
-                    <table class="table table-bordered">
+                    <table class="table table-bordered table-striped">
                         <thead class="table-dark">
                             <tr>
                                 <th>สินค้า</th>
@@ -141,7 +162,7 @@ app.post('/upload', upload.single('file'), (req, res) => {
                             </tr>
                         </thead>
                         <tbody>
-                            ${result1.productModelDetails.map(row => `
+                            ${result1.map(row => `
                                 <tr>
                                     <td>${row.product}</td>
                                     <td>${row.totalModels}</td>
@@ -151,27 +172,29 @@ app.post('/upload', upload.single('file'), (req, res) => {
                     </table>
                 </div>
 
-                <div class="mt-4">
-                    <h3>ข้อมูลจาก Sheet 2</h3>
-                    <table class="table table-bordered">
-                        <thead class="table-dark">
-                            <tr>
-                                <th>โปรสินค้า (รหัสสินค้า)</th>
-                                <th>จำนวนข้อมูลที่ซ้ำ (ครั้ง)</th>
-                                <th>จำนวนอันดับ</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${result2.map(row => `
+                ${allResults.map(sheetResult => `
+                    <div class="mt-4">
+                        <h3>ข้อมูลจาก Sheet (${sheetResult.sheetName})</h3>
+                        <table class="table table-bordered table-striped">
+                            <thead class="table-dark">
                                 <tr>
-                                    <td>${row.product}</td>
-                                    <td>${row.duplicateCount}</td>
-                                    <td>${row.uniqueRanks}</td>
+                                    <th>โปรสินค้า (รหัสสินค้า)</th>
+                                    <th>จำนวนข้อมูลที่ซ้ำ (ครั้ง)</th>
+                                    <th>จำนวนอันดับ</th>
                                 </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody>
+                                ${sheetResult.result.map(row => `
+                                    <tr>
+                                        <td>${row.product}</td>
+                                        <td>${row.duplicateCount}</td>
+                                        <td>${row.uniqueRanks}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `).join('')}
 
                 <div class="mt-4 text-center">
                     <a href="/" class="btn btn-primary">Upload File ใหม่</a>

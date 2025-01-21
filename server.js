@@ -1,20 +1,12 @@
 const express = require('express');
 const multer = require('multer');
 const xlsx = require('xlsx');
-const path = require('path');
 
 const app = express();
 const port = 3000;
 
-// ตั้งค่าการอัปโหลดไฟล์
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/');
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname));
-    }
-});
+// ตั้งค่าการอัปโหลดไฟล์ในหน่วยความจำ
+const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // หน้าแรก
@@ -50,7 +42,8 @@ app.post('/upload', upload.single('file'), (req, res) => {
         return res.send('กรุณาอัปโหลดไฟล์ Excel');
     }
 
-    const workbook = xlsx.readFile(req.file.path);
+    // อ่านไฟล์จาก buffer ในหน่วยความจำ
+    const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
 
     /** ประมวลผล Sheet แรก */
     const sheetName1 = workbook.SheetNames[0]; // ดึง Sheet แรก
